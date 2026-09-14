@@ -1,0 +1,12 @@
+# Pinned loosely: these are the versions the Kaggle T4 image supplied at run time.
+torch>=2.0
+torchvision>=0.15
+numpy>=1.24
+opencv-python-headless>=4.8
+ultralytics>=8.0          # YOLOv8n vehicle detector
+timm>=0.9                 # MiDaS-small backbone via torch.hub
+scikit-learn>=1.3         # k-means for target-set selection
+matplotlib>=3.7
+pillow>=9.5
+# CLIP ViT-B/32, used only by scripts/03_select_diverse_40.py:
+#   pip install git+https://github.com/openai/CLIP.git

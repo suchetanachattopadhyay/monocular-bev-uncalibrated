@@ -1,0 +1,2 @@
+# Track model weights with Git LFS so clones stay small.
+*.pt filter=lfs diff=lfs merge=lfs -text
