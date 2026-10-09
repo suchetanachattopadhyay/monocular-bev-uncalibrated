@@ -1,7 +1,12 @@
 # Monocular BEV Occupancy and 4-DoF Vehicle Pose from Uncalibrated Street Imagery
 
 Code and results for *Calibrated Occupancy Fusion and 4-DoF Vehicle Pose for Monocular
-Bird's-Eye-View Mapping of Uncalibrated Street Imagery* (ICVGIP <!-- YEAR -->, first author).
+Bird's-Eye-View Mapping of Uncalibrated Street Imagery*, Suchetana Chattopadhyay and
+Souparna Chatterjee, to appear at **ICVGIP 2026** (17th Indian Conference on Computer
+Vision, Graphics and Image Processing, Kolkata).
+
+📄 **Paper:** [`paper/Chattopadhyay_Chatterjee_ICVGIP2026.pdf`](paper/Chattopadhyay_Chatterjee_ICVGIP2026.pdf)
+(camera-ready; LaTeX source in [`paper/latex/`](paper/latex/))
 
 **The problem.** Standard BEV perception assumes a calibrated multi-camera rig, LiDAR
 supervision, and temporal context. Crowd-sourced street photos, dashcam stills and phone
@@ -10,18 +15,27 @@ intrinsics, no extrinsics, no depth ground truth, no previous frame — and prod
 200×200 BEV occupancy grid (0.2 m cells, 40 m forward, ±20 m lateral) with oriented
 vehicle footprints.
 
-**Headline numbers.** Replacing a hand-tuned weighted sum over the BEV feature channels
-with a learned per-cell fusion raises held-out IoU on KITTI LiDAR pseudo-labels from
-0.251 to 0.822, and on 40 in-the-wild images raises recovery of geometrically supported
-cells from 14.0% to 75.2% while cutting isolated-cell speckle from 23.3% to 2.3%.
+**Headline numbers.** All fusion methods are scored against the same KITTI LiDAR
+pseudo-labels under two input regimes:
 
-**What that does and doesn't mean.** The pseudo-label is a threshold on projected point
-count, and point density is also input channel 0 — so the learned model is largely
-recovering a *calibrated decision threshold* that the hand-tuned sum destroyed, not
-discovering new geometric structure. The paper argues this explicitly (§4.4) rather than
-presenting the 3.3× as a capability gain. The in-the-wild statistics are behavioural
-(support recovery, speckle, component count), not accuracy — there is no ground truth on
-that domain and none is claimed.
+- **Uncalibrated front-end** (estimated depth + assumed intrinsics — the real setting):
+  the U-Net reaches **0.419 IoU** (0.461 with Depth Anything V2 depth) against 0.101
+  (0.127) for the hand-tuned weighted sum, with no ground-truth calibration anywhere.
+- **Oracle inputs** (ground-truth depth + intrinsics, a reference only): learned fusion
+  raises IoU from 0.251 to 0.805 ± 0.018 (3 seeds) — but an isotonic recalibration of the
+  density channel alone reaches 0.812, so that gain is **calibration**, not new evidence.
+- **In the wild** (40 Mapillary images, no ground truth): learned fusion recovers 75.2% of
+  geometrically supported cells versus 14.0%, and cuts isolated-cell speckle from 23.3%
+  to 2.3%.
+
+**What that does and doesn't mean.** On oracle inputs the pseudo-label is a threshold on
+projected point count, which is also input channel 0, and the experiment confirms the
+learned gain is pure recalibration (§4.3). On front-end inputs the learned models beat
+every density-only reference, but ablations locate the gain precisely: for the per-cell
+MLP it is a *range-dependent* recalibration carried by the depth-mean channel; for the
+U-Net it is partly calibration to the training camera and partly spatial context (§4.5).
+The in-the-wild statistics are behavioural (support recovery, speckle, component count),
+not accuracy — there is no ground truth on that domain and none is claimed.
 
 ---
 
@@ -43,14 +57,46 @@ dominant error source (see Limitations).
 
 ## Results
 
-| Fusion method | params | IoU@0.5 | IoU@best | threshold |
-|---|---|---|---|---|
-| Hand-tuned (0.5 density / 0.2 edge / 0.3 detector) | 0 | 0.0003 | 0.251 | 0.05 |
-| U-Net + PatchGAN | ~10⁶ | 0.722 | 0.722 | 0.50 |
-| **FusionMLP** (1×1 convs, per-cell) | **421** | 0.694 | **0.822** | 0.85 |
+**Front-end inputs** (estimated depth, assumed intrinsics f = 0.85W, h = 1.5 m) — IoU@best / AP:
 
-The 421-parameter per-cell model beats the spatial U-Net at each model's own best-F1
-threshold. Raw numbers: [`results/results_summary.txt`](results/results_summary.txt).
+| Depth source | Hand-tuned | Density (isotonic) | Oracle threshold | FusionMLP | U-Net + PatchGAN |
+|---|---|---|---|---|---|
+| MiDaS-small + ground-plane scale (ours) | 0.101 / 0.171 | 0.197 / 0.213 | 0.208 | 0.245 / 0.299 | **0.419 / 0.610** |
+| Depth Anything V2 † | 0.127 / 0.243 | 0.281 / 0.338 | 0.295 | 0.381 / 0.502 | **0.461 / 0.666** |
+
+† Outdoor metric model fine-tuned on Virtual KITTI 2, so it has a domain advantage on KITTI.
+*Density (isotonic)* is the best global recalibration of density alone; *oracle threshold*
+picks each test image's best density threshold using its label, so no density-only method
+can beat it. U-Net values are 3-seed means (±0.002 for MiDaS-small).
+
+**Oracle inputs** (ground-truth depth and intrinsics; reference only):
+
+| Fusion method | params | IoU@0.5 | IoU@best |
+|---|---|---|---|
+| Hand-tuned (0.5 density / 0.2 edge / 0.3 detector) | 0 | 0.0003 | 0.251 |
+| Density (isotonic) | — | — | 0.812 |
+| U-Net + PatchGAN | ~10⁶ | 0.722 | 0.724 |
+| FusionMLP (1×1 convs, per-cell) | 421 | 0.694 | 0.805 ± 0.018 (3 seeds) |
+
+FusionMLP does not differ from isotonic density in AP (Δ = −0.004, 95% CI [−0.008, 0.001]).
+
+**Where the drop from oracle to front-end comes from** (IoU@best):
+
+| Depth | Intrinsics | Density (isotonic) | FusionMLP | U-Net |
+|---|---|---|---|---|
+| ground truth | ground truth | 0.812 | 0.805 | 0.724 |
+| ground truth | assumed | 0.34 | 0.379 | 0.581 |
+| MiDaS-small | ground truth | 0.29 | 0.33 | — |
+| MiDaS-small | assumed | 0.197 | 0.245 | 0.419 |
+
+The assumed intrinsics cost as much as the cheap depth network. Further ablations (§4.5):
+removing the depth-mean channel drops front-end FusionMLP to exactly density-only (0.197),
+and any other channel changes IoU by ≤ 0.0003; U-Nets trained and tested on the same
+assumed focal length absorb the mismatch, and removing the adversarial loss leaves the
+U-Net unchanged (0.421 vs 0.417). All conclusions also hold on a drive-held-out 726/274
+split, with threshold-free AP, 95% bootstrap CIs and 3 seeds.
+
+Original single-seed oracle numbers: [`results/results_summary.txt`](results/results_summary.txt).
 
 Yaw head: MultiBin over a 6-channel ResNet-18 (RGB + Canny/Sobel/emboss), trained on
 27,965 filtered KITTI Car/Van instances (15% held out). On the held-out split it reaches
@@ -84,7 +130,7 @@ docs/                          fileLog.docx — documentation of a separate, ear
                                internship codebase; see docs/README.md
 results/                       occupancy grids, pose overlays, pose records, metrics
 checkpoints/                   fusion_mlp.pt, unet_generator.pt, patch_discriminator.pt, yaw_head.pt
-paper/                         the paper PDF
+paper/                         camera-ready PDF (ICVGIP 2026) + LaTeX source in paper/latex/
 ```
 
 ## Reproducing
@@ -115,10 +161,15 @@ Stated in full in §5 of the paper; the short version:
   also needs. The radial striping in far-field maps is that missing term's signature.
 - Assumed intrinsics are a consumer-optics average, not the camera that took any given
   photo. Focal-length error scales lateral position linearly.
-- The KITTI split is drawn from continuous drives, so a random 15% split puts near-duplicate
-  frames on both sides. Table 2 should be read as an upper bound.
-- The pseudo-label is a function of an input channel — this bounds what the fusion
-  comparison can establish at all.
+- KITTI frames come from continuous drives, so the random 850/150 split puts near-duplicate
+  frames on both sides; a drive-held-out 726/274 split is also reported, and conclusions
+  hold on it.
+- The pseudo-label is a function of an input channel. On oracle inputs this makes the fusion
+  gain pure calibration; on front-end inputs the per-cell gain is still a recalibration.
+- The U-Net's front-end gain is partly calibration to the KITTI camera and would not be
+  expected to carry over to a camera with different optics without retraining.
+- No calibrated BEV method (MonoLayout, PON, OFT) is compared — they all require known
+  intrinsics, which this setting excludes.
 - Pose is coarse by construction: 2 MultiBin bins, one 4.5 × 1.8 m footprint template for
   every vehicle class including trucks and buses, and translation from ground-contact
   back-projection rather than a 2D–3D box-edge solve.
@@ -130,8 +181,22 @@ Stated in full in §5 of the paper; the short version:
 ## Next steps
 
 Proper affine (scale-and-shift) depth alignment; an overlapping-bin MultiBin head with
-N ≥ 4; completion of the human facing-direction annotation over the 168 crops; and an
-occupancy supervision signal independent of the density channel.
+N ≥ 4; completion of the human facing-direction annotation over the 168 crops; a
+calibrated reference such as MonoLayout; and an occupancy supervision signal independent
+of the density channel.
+
+## Citation
+
+```bibtex
+@inproceedings{chattopadhyay2026monobev,
+  author    = {Suchetana Chattopadhyay and Souparna Chatterjee},
+  title     = {Calibrated Occupancy Fusion and 4-DoF Vehicle Pose for Monocular
+               Bird's-Eye-View Mapping of Uncalibrated Street Imagery},
+  booktitle = {17th Indian Conference on Computer Vision, Graphics and Image
+               Processing (ICVGIP '26)},
+  year      = {2026}
+}
+```
 
 ## Licence
 
